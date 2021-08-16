@@ -14,27 +14,40 @@ import pandas as pd
 import os
 
 
-def is_audio_readable(df, csv_file):
+def get_abspath(df, csv_dir):
+    def find_abspath(csv_dir, audio_path):
+        if os.path.isfile(os.path.abspath(audio_path)):
+            return os.path.abspath(audio_path)
+        elif os.path.isfile(os.path.abspath(os.path.join(csv_dir, audio_path))):
+            return os.path.abspath(os.path.join(csv_dir, audio_path))
+        else:
+            print("ERROR: could not resolve abspath for {}".format(audio_path))
+    df["abspath"] = df.parallel_apply(
+        lambda x: find_abspath(csv_dir, x.wav_filename), axis=1
+    )
+    print("I: Found {} <transcript,clip> pairs in {}".format(df.shape[0],csv_dir))
+
+def is_audio_readable(df, csv_file, audiotype):
     def is_wav_readable(audio_path):
         try:
             read_wav(audio_path)
             return True
-        except:
+        except Exception as exception:
+            print("I: Cannot read {}, raised exception {}".format(audio_path, type(exception).__name__))
             return False
 
     def is_ogg_opus_readable(audio_path):
         try:
             read_ogg_opus(audio_path)
             return True
-        except:
+        except Exception:
+            print("I: Cannot read {}, raised exception {}".format(audio_path, type(exception).__name__))
             return False
 
-    if df["abspath"][0].endswith("wav"):
-        print("I: Found WAV files...")
+    if audiotype == "wav":
         print("I: Checking if WAV readable...")
         df["is_readable"] = df.abspath.parallel_apply(is_wav_readable)
-    elif df["abspath"][0].endswith("opus"):
-        print("I: Found OPUS files...")
+    elif audiotype == "opus":
         print("I: Checking if OPUS readable...")
         df["is_readable"] = df.abspath.parallel_apply(is_ogg_opus_readable)
     df_unreadable = df[df.is_readable == False]
@@ -51,79 +64,58 @@ def is_audio_readable(df, csv_file):
     return df
 
 
-def check_audiotype(df):
+def get_audiotype(df):
     # TODO -- check all filenames, not just first
-    print("I: first audiofile found: {}".format(df["wav_filename"][0]))
-
     if not "transcript" in df.columns and "wav_filename" in df.columns:
         print("ERROR: missing headers 'transcript' and 'wav_filename'")
         exit(1)
-    if not type(df["wav_filename"][0]) is str:
-        print("ERROR: path to file is not string".format(df["wav_filesize"][0]))
+    elif not type(df["wav_filename"][0]) is str:
+        print("ERROR: expected string, found type {}".format(type(df["wav_filesize"][0])))
         exit(1)
-    elif not (
-        df["wav_filename"][0].endswith("wav") or df["wav_filename"][0].endswith("opus")
-    ):
-        print("ERROR: not found '.wav' or '.opus' file extension")
-        exit(1)
-
-
-def get_abspath(csv_dir, audio_path):
-    if os.path.isfile(os.path.abspath(audio_path)):
-        return os.path.abspath(audio_path)
-    elif os.path.isfile(os.path.abspath(os.path.join(csv_dir, audio_path))):
-        return os.path.abspath(os.path.join(csv_dir, audio_path))
+    elif df["wav_filename"][0].endswith("wav") or df["wav_filename"][0].endswith("WAV"):
+        print("I: First WAV file found: {}".format(df["wav_filename"][0]))
+        return "wav"
+    elif df["wav_filename"][0].endswith("opus") or df["wav_filename"][0].endswith("OPUS"):
+        print("I: First OPUS file found: {}".format(df["wav_filename"][0]))
+        return "opus"
     else:
-        print("ERROR: could not resolve abspath for: ", audio_path)
+        print("ERROR: not found WAV or OPUS file extension")
+        exit(1)
 
 
-def get_num_feat_vectors(seconds):
+def get_num_feat_vectors(df):
     # seconds -> milliseconds, divide by 20 millisecond feature_win_step
     # round up to nearest int
-    return int(seconds * 1000 / 20)
+    def calculate_num_vecs(seconds):
+        return int(seconds * 1000 / 20)
+    print("I: Get num feature vectors...")
+    df["num_feat_vectors"] = df.audio_len.parallel_apply(calculate_feat_vecs)
 
 
-def get_audio_duration(df):
-    if df["abspath"][0].endswith("wav"):
-        print("I: Found WAV files...")
+def get_audio_duration(df, audiotype):
+    if audiotype == "wav":
         print("I: Reading WAV duration...")
         df["audio_len"] = df.abspath.parallel_apply(read_wav_duration)
-    elif df["abspath"][0].endswith("opus"):
-        print("I: Found OPUS files...")
+    elif audiotype == "opus":
         print("I: Reading OPUS duration...")
         df["audio_len"] = df.abspath.parallel_apply(read_ogg_opus_duration)
+    else:
+        print("ERROR: unknown audiotype")
+        exit(1)
 
 
-def check_for_offending_transcript_len(csv_file):
-    # can't use progress_bar=True https://github.com/nalepae/pandarallel/issues/131
-    # in Docker, big CSVs run out of space in /dev/shm https://github.com/nalepae/pandarallel/issues/127
-    pandarallel.initialize(use_memory_fs=False)
-
-    # abspath to dir in which CSV file lives
-    csv_dir = Path(csv_file).parent.resolve().absolute()
-    df = pd.read_csv(csv_file)
-
-    check_audiotype(df)
-
-    df["abspath"] = df.parallel_apply(
-        lambda x: get_abspath(csv_dir, x.wav_filename), axis=1
-    )
-
-    print("I: Found {} audiofiles".format(df.shape[0]))
-    df = is_audio_readable(df, csv_file)
-    print("I: Found {} audiofiles".format(df.shape[0]))
-    get_audio_duration(df)
-
-    print("I: Get num feature vectors...")
-    df["num_feat_vectors"] = df.audio_len.parallel_apply(get_num_feat_vectors)
+def get_transcript_length(df):
     print("I: Get transcript length...")
     df["transcript_len"] = df.transcript.parallel_apply(len)
+
+def check_for_offending_input_output_ratio(df, csv_file):
+    # CTC algorithm assumes the input is not shorter than the ouput
+    # if this is not the case, training breaks, and there's probably
+    # something funky with the data
     print("I: Get ratio (num_feats / transcript_len)...")
     df["input_output_ratio"] = df.parallel_apply(
         lambda x: float(x.num_feat_vectors) / float(x.transcript_len), axis=1
     )
-
-    df = df.sort_values(by=["input_output_ratio"])
     offending_samples_df = df[df["input_output_ratio"] <= 1.0]
     if offending_samples_df.shape[0]:
         print(
@@ -145,5 +137,19 @@ if __name__ == "__main__":
 
     os.environ["JOBLIB_TEMP_FOLDER"] = "/tmp"
 
-    CSV = sys.argv[1]
-    check_for_offending_transcript_len(CSV)
+    csv_file = sys.argv[1]
+
+    # can't use progress_bar=True https://github.com/nalepae/pandarallel/issues/131
+    # in Docker, big CSVs run out of space in /dev/shm https://github.com/nalepae/pandarallel/issues/127
+    pandarallel.initialize(use_memory_fs=False)
+
+    # abspath to dir in which CSV file lives
+    csv_dir = Path(csv_file).parent.resolve().absolute()
+    df = pd.read_csv(csv_file)
+    get_abspath(df, csv_dir)
+    audiotype = get_audiotype(df)
+    # df = is_audio_readable(df, csv_file, audiotype)
+    # get_audio_duration(df, audiotype)
+    # get_num_feat_vectors(df)
+    get_transcript_length(df)
+    # check_for_offending_transcript_len(df, csv_file)
