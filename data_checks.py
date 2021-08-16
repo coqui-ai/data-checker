@@ -14,7 +14,7 @@ import pandas as pd
 import os
 
 
-def get_abspath(df, csv_dir):
+def get_abspath(df, csv_file):
     def find_abspath(csv_dir, audio_path):
         if os.path.isfile(os.path.abspath(audio_path)):
             return os.path.abspath(audio_path)
@@ -22,10 +22,11 @@ def get_abspath(df, csv_dir):
             return os.path.abspath(os.path.join(csv_dir, audio_path))
         else:
             print("ERROR: could not resolve abspath for {}".format(audio_path))
+    csv_dir = Path(csv_file).parent.resolve().absolute()
     df["abspath"] = df.parallel_apply(
         lambda x: find_abspath(csv_dir, x.wav_filename), axis=1
     )
-    print("I: Found {} <transcript,clip> pairs in {}".format(df.shape[0],csv_dir))
+    print("I: Found {} <transcript,clip> pairs in {}".format(df.shape[0],csv_file))
 
 def is_audio_readable(df, csv_file, audiotype):
     def is_wav_readable(audio_path):
@@ -144,9 +145,8 @@ if __name__ == "__main__":
     pandarallel.initialize(use_memory_fs=False)
 
     # abspath to dir in which CSV file lives
-    csv_dir = Path(csv_file).parent.resolve().absolute()
     df = pd.read_csv(csv_file)
-    get_abspath(df, csv_dir)
+    get_abspath(df, csv_file)
     audiotype = get_audiotype(df)
     # df = is_audio_readable(df, csv_file, audiotype)
     # get_audio_duration(df, audiotype)
