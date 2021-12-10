@@ -87,10 +87,10 @@ def get_audiotype(df):
 def get_num_feat_vectors(df):
     # seconds -> milliseconds, divide by 20 millisecond feature_win_step
     # round up to nearest int
-    def calculate_num_vecs(seconds):
+    def calculate_num_feat_vecs(seconds):
         return int(seconds * 1000 / 20)
     print("I: Get num feature vectors...")
-    df["num_feat_vectors"] = df.audio_len.parallel_apply(calculate_feat_vecs)
+    df["num_feat_vectors"] = df.audio_len.parallel_apply(calculate_num_feat_vecs)
 
 
 def get_audio_duration(df, audiotype):
@@ -132,6 +132,35 @@ def check_for_offending_input_output_ratio(df, csv_file):
     else:
         print("I: Found no offending <transcript,clip> pairs")
 
+def get_normal_lengths_ratio(df, csv_file):
+    # remove all data whose audio_len/trans_len ratio
+    # is more than two standard deviations from the mean
+    print("I: Get ratio (num_feats / transcript_len)...")
+    df["lens_ratio"] = df.parallel_apply(
+        lambda x: float(x.audio_len) / float(x.transcript_len), axis=1
+    )
+    mean = df["lens_ratio"].mean()
+    std = df["lens_ratio"].std()
+    print(mean, std)
+
+    df["lens_ratio_deviation"] = df.parallel_apply(
+        lambda x: abs(x.lens_ratio - mean) - (2 * std), axis=1
+    )
+    offending_samples_df = df[df["lens_ratio_deviation"] > 0]
+    if offending_samples_df.shape[0]:
+        print(
+            "I: Found {} non-normal <transcript,clip> pairs".format(
+                offending_samples_df.shape[0]
+            )
+        )
+        csv_name = (
+            str(Path(csv_file).resolve().absolute().with_suffix("")) + ".NON_NORMAL"
+        )
+        offending_samples_df.to_csv(csv_name, index=False)
+        print("I: Wrote offending data to {}".format(csv_name))
+    else:
+        print("I: Found no non-normal <transcript,clip> pairs")
+
 
 if __name__ == "__main__":
     import sys
@@ -148,8 +177,9 @@ if __name__ == "__main__":
     df = pd.read_csv(csv_file)
     get_abspath(df, csv_file)
     audiotype = get_audiotype(df)
-    # df = is_audio_readable(df, csv_file, audiotype)
-    # get_audio_duration(df, audiotype)
-    # get_num_feat_vectors(df)
+    df = is_audio_readable(df, csv_file, audiotype)
+    get_audio_duration(df, audiotype)
+    get_num_feat_vectors(df)
     get_transcript_length(df)
-    # check_for_offending_transcript_len(df, csv_file)
+    check_for_offending_input_output_ratio(df, csv_file)
+    get_normal_lengths_ratio(df, csv_file)
