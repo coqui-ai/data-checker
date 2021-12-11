@@ -133,7 +133,7 @@ def check_for_offending_input_output_ratio(df, csv_file):
     else:
         print("I: Found no offending <transcript,clip> pairs")
 
-def get_normal_lengths_ratio(df, csv_file):
+def get_normal_lengths_ratio(df, csv_file, num_std_devs):
     # remove all data whose audio_len/trans_len ratio
     # is more than two standard deviations from the mean
     print("I: Get ratio (num_feats / transcript_len)...")
@@ -144,7 +144,7 @@ def get_normal_lengths_ratio(df, csv_file):
     std = df["lens_ratio"].std()
 
     df["lens_ratio_deviation"] = df.parallel_apply(
-        lambda x: abs(x.lens_ratio - mean) - (2 * std), axis=1
+        lambda x: abs(x.lens_ratio - mean) - (num_std_devs * std), axis=1
     )
     offending_samples_df = df[df["lens_ratio_deviation"] > 0]
     if offending_samples_df.shape[0]:
@@ -203,4 +203,4 @@ if __name__ == "__main__":
     get_num_feat_vectors(df)
     get_transcript_length(df)
     check_for_offending_input_output_ratio(df, csv_file)
-    get_normal_lengths_ratio(df, csv_file)
+    get_normal_lengths_ratio(df, csv_file, 1)
