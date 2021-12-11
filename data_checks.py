@@ -94,6 +94,7 @@ def get_num_feat_vectors(df):
 
 
 def get_audio_duration(df, audiotype):
+    # get number of seconds of audio
     if audiotype == "wav":
         print("I: Reading WAV duration...")
         df["audio_len"] = df.abspath.parallel_apply(read_wav_duration)
@@ -141,7 +142,6 @@ def get_normal_lengths_ratio(df, csv_file):
     )
     mean = df["lens_ratio"].mean()
     std = df["lens_ratio"].std()
-    print(mean, std)
 
     df["lens_ratio_deviation"] = df.parallel_apply(
         lambda x: abs(x.lens_ratio - mean) - (2 * std), axis=1
@@ -161,6 +161,25 @@ def get_normal_lengths_ratio(df, csv_file):
     else:
         print("I: Found no non-normal <transcript,clip> pairs")
 
+def cut_off_audio_len(df, csv_file, max_len):
+    # remove all data whose over a max audio len
+    offending_samples_df = df[df["audio_len"] > max_len]
+    if offending_samples_df.shape[0]:
+        print(
+            "I: Found {} audio clips over {} seconds long".format(
+                offending_samples_df.shape[0], max_len
+            )
+        )
+        csv_name = (
+            str(Path(csv_file).resolve().absolute().with_suffix("")) + ".TOO_LONG"
+        )
+        offending_samples_df.to_csv(csv_name, index=False)
+        print("I: Wrote too long data to {}".format(csv_name))
+    else:
+        print("I: Found no audio clips over {} seconds in length".format(
+            max_len
+        )
+    )
 
 if __name__ == "__main__":
     import sys
@@ -179,6 +198,8 @@ if __name__ == "__main__":
     audiotype = get_audiotype(df)
     df = is_audio_readable(df, csv_file, audiotype)
     get_audio_duration(df, audiotype)
+    cut_off_audio_len(df, csv_file, 30)
+    df = df[df["audio_len"] < 30]
     get_num_feat_vectors(df)
     get_transcript_length(df)
     check_for_offending_input_output_ratio(df, csv_file)

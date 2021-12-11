@@ -1,0 +1,34 @@
+                                                                                                                                                
+================
+== TensorFlow ==
+================
+
+NVIDIA Release 20.06-tf1 (build 13409399)
+TensorFlow Version 1.15.2
+
+Container image Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
+Copyright 2017-2020 The TensorFlow Authors.  All rights reserved.
+
+NVIDIA Deep Learning Profiler (dlprof) Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
+
+Various files include modifications (c) NVIDIA CORPORATION.  All rights reserved.
+NVIDIA modifications are covered by the license terms that apply to the underlying project or file.
+
+WARNING: The NVIDIA Driver was not detected.  GPU functionality will not be available.
+   Use 'nvidia-docker run' to start this container; see
+   https://github.com/NVIDIA/nvidia-docker/wiki/nvidia-docker .
+
+NOTE: MOFED driver for multi-node communication was not detected.
+      Multi-node communication performance may be reduced.
+
+NOTE: The SHMEM allocation limit is set to the default of 64MB.  This may be
+   insufficient for TensorFlow.  NVIDIA recommends the use of the following flags:
+   nvidia-docker run --shm-size=1g --ulimit memlock=-1 --ulimit stack=67108864 ...
+
+2021-12-11 00:43:43.384398: I tensorflow/stream_executor/platform/default/dso_loader.cc:48] Successfully opened dynamic library libcudart.so.11.0
+WARNING:tensorflow:Deprecation warnings have been disabled. Set TF_ENABLE_DEPRECATION_WARNINGS=1 to re-enable them.
+INFO: Pandarallel will run on 36 workers.
+INFO: Pandarallel will use standard multiprocessing data transfer (pipe) to transfer data between the main process and workers.
+I: Found 12713 <transcript,clip> pairs in /mnt/open-bible/yoruba/all/data.csv
+I: First WAV file found: 1CH_001/1CH_001_0_downsampled.wav
+I: Checking if WAV readable...
