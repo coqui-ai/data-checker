@@ -181,6 +181,26 @@ def cut_off_audio_len(df, csv_file, max_len):
         )
     )
 
+def cut_off_transcript_len(df, csv_file, min_len):
+    # remove all data with transcripts under min length
+    offending_samples_df = df[df["transcript_len"] < min_len]
+    if offending_samples_df.shape[0]:
+        print(
+            "I: Found {} transcripts under {} characters long".format(
+                offending_samples_df.shape[0], min_len
+            )
+        )
+        csv_name = (
+            str(Path(csv_file).resolve().absolute().with_suffix("")) + ".TOO_SHORT_TRANS"
+        )
+        offending_samples_df.to_csv(csv_name, index=False)
+        print("I: Wrote too short transcript data to {}".format(csv_name))
+    else:
+        print("I: Found no transcripts under {} characters in length".format(
+            min_len
+        )
+    )
+
 if __name__ == "__main__":
     import sys
 
@@ -200,7 +220,11 @@ if __name__ == "__main__":
     get_audio_duration(df, audiotype)
     cut_off_audio_len(df, csv_file, 30)
     df = df[df["audio_len"] < 30]
-    get_num_feat_vectors(df)
+
     get_transcript_length(df)
+    cut_off_transcript_len(df, csv_file, 10)
+    df = df[df["transcript_len"] > 10]
+
+    get_num_feat_vectors(df)
     check_for_offending_input_output_ratio(df, csv_file)
-    get_normal_lengths_ratio(df, csv_file, 1)
+    get_normal_lengths_ratio(df, csv_file, .5)
