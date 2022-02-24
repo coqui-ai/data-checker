@@ -1,6 +1,10 @@
-# goals for this script/ module
-# 1) take in a CSV file with three columns (name,size,transcript),
-#    and return problematic data (output longer than input)
+# Goals for this tool:
+#
+# Take in a CSV file with three columns (file_path, transcript),
+#    and return information on:
+#     1) definitely bad data
+#     2) probably bad data
+#     3) probably good data
 
 from coqui_stt_training.util.audio import (
     read_ogg_opus,
@@ -135,7 +139,7 @@ def check_for_offending_input_output_ratio(df, csv_file):
 
 def get_normal_lengths_ratio(df, csv_file, num_std_devs):
     # remove all data whose audio_len/trans_len ratio
-    # is more than two standard deviations from the mean
+    # is more than num_std_devs standard deviations from the mean
     print("I: Get ratio (num_feats / transcript_len)...")
     df["lens_ratio"] = df.parallel_apply(
         lambda x: float(x.audio_len) / float(x.transcript_len), axis=1
@@ -213,10 +217,16 @@ if __name__ == "__main__":
     pandarallel.initialize(use_memory_fs=False)
 
     # abspath to dir in which CSV file lives
+
+    ### Prepping ###
     df = pd.read_csv(csv_file)
     get_abspath(df, csv_file)
     audiotype = get_audiotype(df)
+
+    ### Must-run checks ###
     df = is_audio_readable(df, csv_file, audiotype)
+
+    ### Following checks are as you wish ###
     get_audio_duration(df, audiotype)
     cut_off_audio_len(df, csv_file, 30)
     df = df[df["audio_len"] < 30]
