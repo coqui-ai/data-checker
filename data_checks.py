@@ -7,10 +7,9 @@
 #     3) probably good data
 
 from coqui_stt_training.util.audio import (
-    read_ogg_opus,
-    read_ogg_opus_duration,
-    read_wav,
-    read_wav_duration,
+    read_audio,
+    read_duration,
+    get_loadable_audio_type_from_extension,
 )
 from pandarallel import pandarallel
 from pathlib import Path
@@ -25,66 +24,57 @@ def get_abspath(df, csv_file):
         elif os.path.isfile(os.path.abspath(os.path.join(csv_dir, audio_path))):
             return os.path.abspath(os.path.join(csv_dir, audio_path))
         else:
-            print("ERROR: could not resolve abspath for {}".format(audio_path))
+            print("🚨 ERROR: could not resolve abspath for {}".format(audio_path))
     csv_dir = Path(csv_file).parent.resolve().absolute()
     df["abspath"] = df.parallel_apply(
         lambda x: find_abspath(csv_dir, x.wav_filename), axis=1
     )
     print("I: Found {} <transcript,clip> pairs in {}".format(df.shape[0],csv_file))
 
-def is_audio_readable(df, csv_file, audiotype):
-    def is_wav_readable(audio_path):
+
+def is_audio_readable(df, csv_file, AUDIO_TYPE):
+    def is_audio_readable_(AUDIO_TYPE, audio_path):
         try:
-            read_wav(audio_path)
+            read_audio(AUDIO_TYPE, audio_path)
             return True
         except Exception as exception:
-            print("I: Cannot read {}, raised exception {}".format(audio_path, type(exception).__name__))
+            print(
+                "I: Cannot read {}, raised exception {}".format(audio_path,exception),
+            )
             return False
 
-    def is_ogg_opus_readable(audio_path):
-        try:
-            read_ogg_opus(audio_path)
-            return True
-        except Exception:
-            print("I: Cannot read {}, raised exception {}".format(audio_path, type(exception).__name__))
-            return False
+    print("I: Checking if audio is readable...")
 
-    if audiotype == "wav":
-        print("I: Checking if WAV readable...")
-        df["is_readable"] = df.abspath.parallel_apply(is_wav_readable)
-    elif audiotype == "opus":
-        print("I: Checking if OPUS readable...")
-        df["is_readable"] = df.abspath.parallel_apply(is_ogg_opus_readable)
+    df["is_readable"] = df.abspath.parallel_apply(lambda x: is_audio_readable_(AUDIO_TYPE, x))
+    #df["is_readable"] = df.abspath.parallel_apply(is_audio_readable_)
     df_unreadable = df[df.is_readable == False]
     if df_unreadable.shape[0]:
-        print("I: Found {} unreadable audiofiles".format(df_unreadable.shape[0]))
+        print("👀 Found {} unreadable audiofiles".format(df_unreadable.shape[0]))
         csv_name = (
             str(Path(csv_file).resolve().absolute().with_suffix("")) + ".UNREADABLE"
         )
         df_unreadable.to_csv(csv_name, index=False)
         print("I: Wrote unreadable data to {}".format(csv_name))
     else:
-        print("I: Found no unreadable audiofiles")
+        print("😊 Found no unreadable audiofiles")
     df = df[df.is_readable == True]
     return df
 
 
-def get_audiotype(df):
+def get_audio_type(df):
     # TODO -- check all filenames, not just first
     if not "transcript" in df.columns and "wav_filename" in df.columns:
-        print("ERROR: missing headers 'transcript' and 'wav_filename'")
+        print("🚨 ERROR: missing headers 'transcript' and 'wav_filename'")
         exit(1)
     elif not type(df["wav_filename"][0]) is str:
-        print("ERROR: expected string, found type {}".format(type(df["wav_filesize"][0])))
+        print("🚨 ERROR: expected string, found type {}".format(type(df["wav_filesize"][0])))
         exit(1)
-    elif df["wav_filename"][0].endswith("wav") or df["wav_filename"][0].endswith("WAV"):
-        print("I: First WAV file found: {}".format(df["wav_filename"][0]))
-        return "wav"
-    elif df["wav_filename"][0].endswith("opus") or df["wav_filename"][0].endswith("OPUS"):
-        print("I: First OPUS file found: {}".format(df["wav_filename"][0]))
-        return "opus"
+    AUDIO_TYPE = get_loadable_audio_type_from_extension(os.path.splitext(df["wav_filename"][0])[1].lower())
+    if AUDIO_TYPE:
+        print("I: First audio file found: {} of type {}".format((df["wav_filename"][0]), AUDIO_TYPE))
+        return AUDIO_TYPE
     else:
-        print("ERROR: not found WAV or OPUS file extension")
+        print("🚨 ERROR: unknown Audio type file extension")
         exit(1)
 
 
@@ -97,24 +87,21 @@ def get_num_feat_vectors(df):
     df["num_feat_vectors"] = df.audio_len.parallel_apply(calculate_num_feat_vecs)
 
 
-def get_audio_duration(df, audiotype):
+def get_audio_duration(df, AUDIO_TYPE):
     # get number of seconds of audio
-    if audiotype == "wav":
-        print("I: Reading WAV duration...")
-        df["audio_len"] = df.abspath.parallel_apply(read_wav_duration)
-    elif audiotype == "opus":
-        print("I: Reading OPUS duration...")
-        df["audio_len"] = df.abspath.parallel_apply(read_ogg_opus_duration)
-    else:
-        print("ERROR: unknown audiotype")
-        exit(1)
+    def _read_duration(audio):
+        read_duration(AUDIO_TYPE, audio)
+    print("I: Reading audio duration...")
+    df["audio_len"] = df.abspath.parallel_apply(lambda x: read_duration(AUDIO_TYPE, x))
+    #df["audio_len"] = df.abspath.parallel_apply(_read_duration)
 
 
 def get_transcript_length(df):
     print("I: Get transcript length...")
     df["transcript_len"] = df.transcript.parallel_apply(len)
 
-def check_for_offending_input_output_ratio(df, csv_file):
+
+def remove_offending_input_output_ratio(df, csv_file):
     # CTC algorithm assumes the input is not shorter than the ouput
     # if this is not the case, training breaks, and there's probably
     # something funky with the data
@@ -125,7 +112,7 @@ def check_for_offending_input_output_ratio(df, csv_file):
     offending_samples_df = df[df["input_output_ratio"] <= 1.0]
     if offending_samples_df.shape[0]:
         print(
-            "I: Found {} offending <transcript,clip> pairs".format(
+            "👀 Found {} <transcript,clip> pairs with more text than audio (bad for CTC)".format(
                 offending_samples_df.shape[0]
             )
         )
@@ -134,13 +121,17 @@ def check_for_offending_input_output_ratio(df, csv_file):
         )
         offending_samples_df.to_csv(csv_name, index=False)
         print("I: Wrote offending data to {}".format(csv_name))
+        df = df[df["input_output_ratio"] > 1.0]
+        return df
     else:
-        print("I: Found no offending <transcript,clip> pairs")
+        print("😊 Found no offending <transcript,clip> pairs")
+        return df
 
-def get_normal_lengths_ratio(df, csv_file, num_std_devs):
+
+def remove_outliers(df, csv_file, num_std_devs):
     # remove all data whose audio_len/trans_len ratio
     # is more than num_std_devs standard deviations from the mean
-    print("I: Get ratio (num_feats / transcript_len)...")
+    print("I: Calculating ratio (num_feats : transcript_len)...")
     df["lens_ratio"] = df.parallel_apply(
         lambda x: float(x.audio_len) / float(x.transcript_len), axis=1
     )
@@ -153,8 +144,9 @@ def get_normal_lengths_ratio(df, csv_file, num_std_devs):
     offending_samples_df = df[df["lens_ratio_deviation"] > 0]
     if offending_samples_df.shape[0]:
         print(
-            "I: Found {} non-normal <transcript,clip> pairs".format(
-                offending_samples_df.shape[0]
+            "👀 Found {} <transcript,clip> pairs more than {} standard deviations from the mean".format(
+                offending_samples_df.shape[0],
+                num_std_devs
             )
         )
         csv_name = (
@@ -162,15 +154,19 @@ def get_normal_lengths_ratio(df, csv_file, num_std_devs):
         )
         offending_samples_df.to_csv(csv_name, index=False)
         print("I: Wrote offending data to {}".format(csv_name))
+        df = df[df["lens_ratio_deviation"] <= 0]
+        return df
     else:
-        print("I: Found no non-normal <transcript,clip> pairs")
+        print("😊 Found no <transcript,clip> pairs more than {} standard deviations from the mean".format(num_std_devs))
+        return df
+
 
 def cut_off_audio_len(df, csv_file, max_len):
     # remove all data whose over a max audio len
     offending_samples_df = df[df["audio_len"] > max_len]
     if offending_samples_df.shape[0]:
         print(
-            "I: Found {} audio clips over {} seconds long".format(
+            "👀 Found {} audio clips over {} seconds long".format(
                 offending_samples_df.shape[0], max_len
             )
         )
@@ -179,18 +175,19 @@ def cut_off_audio_len(df, csv_file, max_len):
         )
         offending_samples_df.to_csv(csv_name, index=False)
         print("I: Wrote too long data to {}".format(csv_name))
+        df = df[df["audio_len"] < 30]
+        return df
     else:
-        print("I: Found no audio clips over {} seconds in length".format(
-            max_len
-        )
-    )
+        print("😊 Found no audio clips over {} seconds in length".format(max_len))
+        return df
+
 
 def cut_off_transcript_len(df, csv_file, min_len):
     # remove all data with transcripts under min length
     offending_samples_df = df[df["transcript_len"] < min_len]
     if offending_samples_df.shape[0]:
         print(
-            "I: Found {} transcripts under {} characters long".format(
+            "👀 Found {} transcripts under {} characters long".format(
                 offending_samples_df.shape[0], min_len
             )
         )
@@ -199,11 +196,12 @@ def cut_off_transcript_len(df, csv_file, min_len):
         )
         offending_samples_df.to_csv(csv_name, index=False)
         print("I: Wrote too short transcript data to {}".format(csv_name))
+        df = df[df["transcript_len"] > 10]
+        return df
     else:
-        print("I: Found no transcripts under {} characters in length".format(
-            min_len
-        )
-    )
+        print("😊 Found no transcripts under {} characters in length".format(min_len))
+        return df
+
 
 if __name__ == "__main__":
     import sys
@@ -221,20 +219,24 @@ if __name__ == "__main__":
     ### Prepping ###
     df = pd.read_csv(csv_file)
     get_abspath(df, csv_file)
-    audiotype = get_audiotype(df)
+    AUDIO_TYPE = get_audio_type(df)
 
     ### Must-run checks ###
-    df = is_audio_readable(df, csv_file, audiotype)
+    df = is_audio_readable(df, csv_file, AUDIO_TYPE)
 
     ### Following checks are as you wish ###
-    get_audio_duration(df, audiotype)
-    cut_off_audio_len(df, csv_file, 30)
-    df = df[df["audio_len"] < 30]
-
+    get_audio_duration(df, AUDIO_TYPE)
     get_transcript_length(df)
-    cut_off_transcript_len(df, csv_file, 10)
-    df = df[df["transcript_len"] > 10]
-
     get_num_feat_vectors(df)
-    check_for_offending_input_output_ratio(df, csv_file)
-    get_normal_lengths_ratio(df, csv_file, .5)
+
+    df = cut_off_audio_len(df, csv_file, 30)
+    print(df.shape)
+    df = cut_off_transcript_len(df, csv_file, 10)
+    df = remove_offending_input_output_ratio(df, csv_file)
+    df = remove_outliers(df, csv_file, num_std_devs=2)
+
+    csv_name = (
+        str(Path(csv_file).resolve().absolute().with_suffix("")) + ".BEST"
+    )
+    df.to_csv(csv_name, index=False)
+    print("🎉 Wrote best data to {}".format(csv_name))
