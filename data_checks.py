@@ -250,6 +250,13 @@ if __name__ == "__main__":
 
     ### Following checks are as you wish ###
     get_audio_duration(df, AUDIO_TYPE)
+    org_total_hours = ( df["audio_len"].sum() / 3600 )
+    print(
+        "👀 ─ Found a total of {} hours of readable data".format(
+            org_total_hours
+        )
+    )
+
     get_transcript_length(df)
     get_num_feat_vectors(df)
 
@@ -263,10 +270,15 @@ if __name__ == "__main__":
     )
     df.to_csv(csv_name, index=False)
     total_hours = ( df["audio_len"].sum() / 3600 )
+    total_hours_removed = org_total_hours - total_hours
     print(
         "🎉 ┬ Saved a total of {} hours of data to BEST dataset".format(
             total_hours
         )
     )
+    print(
+        "   ├ After all data checks, a total of {} hours of data were removed".format(
+            total_hours_removed
+        )
+    )
     print("   └ Wrote best data to {}".format(csv_name))
-
