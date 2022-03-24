@@ -29,7 +29,7 @@ def get_abspath(df, csv_file):
     df["abspath"] = df.parallel_apply(
         lambda x: find_abspath(csv_dir, x.wav_filename), axis=1
     )
-    print(" · Found {} <transcript,clip> pairs in {}".format(df.shape[0],csv_file))
+    print("👀 ─ Found {} <transcript,clip> pairs in {}".format(df.shape[0],csv_file))
 
 
 def is_audio_readable(df, csv_file, AUDIO_TYPE):
@@ -49,7 +49,7 @@ def is_audio_readable(df, csv_file, AUDIO_TYPE):
     #df["is_readable"] = df.abspath.parallel_apply(is_audio_readable_)
     df_unreadable = df[df.is_readable == False]
     if df_unreadable.shape[0]:
-        print("👀 Found {} unreadable audiofiles".format(df_unreadable.shape[0]))
+        print("👀 ─ Found {} unreadable audiofiles".format(df_unreadable.shape[0]))
         csv_name = (
             str(Path(csv_file).resolve().absolute().with_suffix("")) + ".UNREADABLE"
         )
@@ -63,10 +63,7 @@ def is_audio_readable(df, csv_file, AUDIO_TYPE):
 
 def get_audio_type(df):
     # TODO -- check all filenames, not just first
-    if not "transcript" in df.columns and "wav_filename" in df.columns:
-        print("🚨 ERROR: missing headers 'transcript' and 'wav_filename'")
-        exit(1)
-    elif not type(df["wav_filename"][0]) is str:
+    if not type(df["wav_filename"][0]) is str:
         print("🚨 ERROR: expected string, found type {}".format(type(df["wav_filesize"][0])))
         exit(1)
     AUDIO_TYPE = get_loadable_audio_type_from_extension(os.path.splitext(df["wav_filename"][0])[1].lower())
@@ -98,7 +95,7 @@ def get_audio_duration(df, AUDIO_TYPE):
 
 def get_transcript_length(df):
     print(" · Get transcript length...")
-    df["transcript_len"] = df.transcript.parallel_apply(len)
+    df["transcript_len"] = df.transcript.parallel_apply(lambda x: len(str(x)))
 
 
 def remove_offending_input_output_ratio(df, csv_file):
@@ -233,19 +230,19 @@ if __name__ == "__main__":
     os.environ["JOBLIB_TEMP_FOLDER"] = "/tmp"
 
     csv_file = sys.argv[1]
+    num_std_devs = float(sys.argv[2])
 
     # can't use progress_bar=True https://github.com/nalepae/pandarallel/issues/131
     # in Docker, big CSVs run out of space in /dev/shm https://github.com/nalepae/pandarallel/issues/127
     pandarallel.initialize(use_memory_fs=False)
 
-    # abspath to dir in which CSV file lives
-
-    ### Prepping ###
+    ### Must-run ###
     df = pd.read_csv(csv_file)
+    if ( "transcript" not in df.columns ) or ( "wav_filename" not in df.columns ):
+        print("🚨 ERROR: missing headers 'transcript' and 'wav_filename'")
+        exit(1)
     get_abspath(df, csv_file)
     AUDIO_TYPE = get_audio_type(df)
-
-    ### Must-run checks ###
     df = is_audio_readable(df, csv_file, AUDIO_TYPE)
 
     ### Following checks are as you wish ###
@@ -263,7 +260,7 @@ if __name__ == "__main__":
     df = cut_off_audio_len(df, csv_file, 30)
     df = cut_off_transcript_len(df, csv_file, 10)
     df = remove_offending_input_output_ratio(df, csv_file)
-    df = remove_outliers(df, csv_file, num_std_devs=2)
+    df = remove_outliers(df, csv_file, num_std_devs=num_std_devs)
 
     csv_name = (
         str(Path(csv_file).resolve().absolute().with_suffix("")) + ".BEST"
