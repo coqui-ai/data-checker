@@ -29,7 +29,7 @@ def get_abspath(df, csv_file):
     df["abspath"] = df.parallel_apply(
         lambda x: find_abspath(csv_dir, x.wav_filename), axis=1
     )
-    print("👀 ─ Found {} <transcript,clip> pairs in {}".format(df.shape[0],csv_file))
+    return df
 
 
 def is_audio_readable(df, csv_file, AUDIO_TYPE):
@@ -115,7 +115,7 @@ def remove_offending_input_output_ratio(df, csv_file):
         )
         total_hours = ( offending_samples_df["audio_len"].sum() / 3600 )
         print(
-            "   ├ Removing a total of {} hours of data from BEST dataset".format(
+            "   ├ Removing a total of {:0.2f} hours of data from BEST dataset".format(
                 total_hours
             )
         )
@@ -154,7 +154,7 @@ def remove_outliers(df, csv_file, num_std_devs):
         )
         total_hours = ( offending_samples_df["audio_len"].sum() / 3600 )
         print(
-            "   ├ Removing a total of {} hours of data from BEST dataset".format(
+            "   ├ Removing a total of {:0.2f} hours of data from BEST dataset".format(
                 total_hours
             )
         )
@@ -181,7 +181,7 @@ def cut_off_audio_len(df, csv_file, max_len):
         )
         total_hours = ( offending_samples_df["audio_len"].sum() / 3600 )
         print(
-            "   ├ Removing a total of {} hours of data from BEST dataset".format(
+            "   ├ Removing a total of {:0.2f} hours of data from BEST dataset".format(
                 total_hours
             )
         )
@@ -208,7 +208,7 @@ def cut_off_transcript_len(df, csv_file, min_len):
         )
         total_hours = ( offending_samples_df["audio_len"].sum() / 3600 )
         print(
-            "   ├ Removing a total of {} hours of data from BEST dataset".format(
+            "   ├ Removing a total of {:0.2f} hours of data from BEST dataset".format(
                 total_hours
             )
         )
@@ -241,7 +241,11 @@ if __name__ == "__main__":
     if ( "transcript" not in df.columns ) or ( "wav_filename" not in df.columns ):
         print("🚨 ERROR: missing headers 'transcript' and 'wav_filename'")
         exit(1)
-    get_abspath(df, csv_file)
+    df = get_abspath(df, csv_file)
+    org_total_samples = df.shape[0]
+    print("👀 ─ Found {} <transcript,clip> pairs in {}".format(
+        org_total_samples,csv_file
+    ))
     AUDIO_TYPE = get_audio_type(df)
     df = is_audio_readable(df, csv_file, AUDIO_TYPE)
 
@@ -249,7 +253,7 @@ if __name__ == "__main__":
     get_audio_duration(df, AUDIO_TYPE)
     org_total_hours = ( df["audio_len"].sum() / 3600 )
     print(
-        "👀 ─ Found a total of {} hours of readable data".format(
+        "👀 ─ Found a total of {:0.2f} hours of readable data".format(
             org_total_hours
         )
     )
@@ -266,16 +270,27 @@ if __name__ == "__main__":
         str(Path(csv_file).resolve().absolute().with_suffix("")) + ".BEST"
     )
     df.to_csv(csv_name, index=False)
-    total_hours = ( df["audio_len"].sum() / 3600 )
-    total_hours_removed = org_total_hours - total_hours
+    new_total_hours = ( df["audio_len"].sum() / 3600 )
+    total_hours_removed = org_total_hours - new_total_hours
+    percent_hours_removed = (total_hours_removed / org_total_hours)*100
+    new_total_samples = df.shape[0]
+    total_samples_removed = org_total_samples - new_total_samples
+    percent_samples_removed = (total_samples_removed / org_total_samples)*100
     print(
-        "🎉 ┬ Saved a total of {} hours of data to BEST dataset".format(
-            total_hours
+        "🎉 ┬ Saved a total of {:0.2f} hours of data to BEST dataset".format(
+            new_total_hours
         )
     )
     print(
-        "   ├ After all data checks, a total of {} hours of data were removed".format(
-            total_hours_removed
+        "   ├ After all data checks, removed a total of {:0.2f} hours ({:0.2f}% of original data)".format(
+            total_hours_removed,
+            percent_hours_removed
+        )
+    )
+    print(
+        "   ├ After all data checks, remove a total of {} samples ({:0.2f}% of original data)".format(
+            total_samples_removed,
+            percent_samples_removed
         )
     )
     print("   └ Wrote best data to {}".format(csv_name))
