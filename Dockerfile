@@ -1,4 +1,4 @@
-FROM stt-train-local
+FROM ghcr.io/coqui-ai/stt-train:main
 
 RUN python -m pip install pandarallel
 
