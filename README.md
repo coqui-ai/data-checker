@@ -40,5 +40,5 @@ $ docker run data-checker python data_checks.py "/code/data/smoke_test/russian_s
 ### Run on your data
 
 ```
-$ docker run data-checker --mount "type=bind,src=/path/to/my/local/data,dst=/mnt"python data_checks.py "/mnt/my-data.csv" 2
+$ docker run data-checker --mount "type=bind,src=/path/to/my/local/data,dst=/mnt" python data_checks.py "/mnt/my-data.csv" 2
 ```
