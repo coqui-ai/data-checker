@@ -282,13 +282,13 @@ if __name__ == "__main__":
         )
     )
     print(
-        "   ├ After all data checks, removed a total of {:0.2f} hours ({:0.2f}% of original data)".format(
+        "   ├ Removed a total of {:0.2f} hours ({:0.2f}% of original data)".format(
             total_hours_removed,
             percent_hours_removed
         )
     )
     print(
-        "   ├ After all data checks, remove a total of {} samples ({:0.2f}% of original data)".format(
+        "   ├ Removed a total of {} samples ({:0.2f}% of original data)".format(
             total_samples_removed,
             percent_samples_removed
         )
