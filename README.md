@@ -39,6 +39,8 @@ $ docker run data-checker python data_checks.py "/code/data/smoke_test/russian_s
 
 ### Run on your data
 
+`data-checker` assumes your CSV has two columns: `wav_filename` and `transcript`. Note that you don't actually need to use WAV files, but the header still should be `wav_filename`.
+
 ```
 $ docker run data-checker --mount "type=bind,src=/path/to/my/local/data,dst=/mnt" python data_checks.py "/mnt/my-data.csv" 2
 ```
