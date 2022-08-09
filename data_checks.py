@@ -65,7 +65,6 @@ def get_abspath(df, csv_file):
 def is_audio_readable(df, csv_file, AUDIO_TYPE):
     def is_audio_readable_(AUDIO_TYPE, audio_path):
         try:
-            print(f"this is the audio path: {audio_path}")
             read_audio(AUDIO_TYPE, audio_path)
             return True
         except Exception as exception:
@@ -169,7 +168,6 @@ def remove_text_outliers(df, csv_file, num_std_devs, stt_model_path, stt_scorer_
     stt_model = SttTranscriber(stt_model_path, stt_scorer_path)
     stt_texts = []
     for i in tqdm(range(len(df))):
-        # print(df.iloc[i]['abspath'])
         stt_texts.append(stt_model.transcribe(df.iloc[i]['abspath']))
 
     df['stt_transcript'] = stt_texts
