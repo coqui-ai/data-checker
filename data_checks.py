@@ -15,6 +15,35 @@ from pandarallel import pandarallel
 from pathlib import Path
 import pandas as pd
 import os
+import stt
+import librosa
+import numpy as np
+from tqdm import tqdm
+
+
+class SttTranscriber:
+    """Audio transcriber using coqui stt python client.
+        Faster than aws transcriber if you have a gpu so only use with gpu.
+
+    Args:
+        model_path (str): Path to tflite file.
+
+        scorer_path (str): Path to language model for scoring.
+    """
+
+    def __init__(self, model_path, scorer_path):
+        self.model = stt.Model(model_path)
+        self.model.enableExternalScorer(scorer_path)
+
+    def transcribe(self, audio_path):
+        """Run stt model on audio file and get transcript
+
+        Args:
+            audio_path (str): Path to audio file to run stt on.
+        """
+        data, sr = librosa.load(audio_path, sr=16000)
+        wav_norm = data * (32767 / max(0.01, np.max(np.abs(data))))
+        return self.model.stt(wav_norm.astype(np.int16))
 
 
 def get_abspath(df, csv_file):
@@ -25,6 +54,7 @@ def get_abspath(df, csv_file):
             return os.path.abspath(os.path.join(csv_dir, audio_path))
         else:
             print("🚨 ERROR: could not resolve abspath for {}".format(audio_path))
+
     csv_dir = Path(csv_file).parent.resolve().absolute()
     df["abspath"] = df.parallel_apply(
         lambda x: find_abspath(csv_dir, x.wav_filename), axis=1
@@ -35,23 +65,24 @@ def get_abspath(df, csv_file):
 def is_audio_readable(df, csv_file, AUDIO_TYPE):
     def is_audio_readable_(AUDIO_TYPE, audio_path):
         try:
+            print(f"this is the audio path: {audio_path}")
             read_audio(AUDIO_TYPE, audio_path)
             return True
         except Exception as exception:
             print(
-                " · Cannot read {}, raised exception {}".format(audio_path,exception),
+                " · Cannot read {}, raised exception {}".format(audio_path, exception),
             )
             return False
 
     print(" · Checking if audio is readable...")
 
     df["is_readable"] = df.abspath.parallel_apply(lambda x: is_audio_readable_(AUDIO_TYPE, x))
-    #df["is_readable"] = df.abspath.parallel_apply(is_audio_readable_)
+    # df["is_readable"] = df.abspath.parallel_apply(is_audio_readable_)
     df_unreadable = df[df.is_readable == False]
     if df_unreadable.shape[0]:
         print("👀 ─ Found {} unreadable audiofiles".format(df_unreadable.shape[0]))
         csv_name = (
-            str(Path(csv_file).resolve().absolute().with_suffix("")) + ".UNREADABLE"
+                str(Path(csv_file).resolve().absolute().with_suffix("")) + ".UNREADABLE"
         )
         df_unreadable.to_csv(csv_name, index=False)
         print(" · Wrote unreadable data to {}".format(csv_name))
@@ -80,6 +111,7 @@ def get_num_feat_vectors(df):
     # round up to nearest int
     def calculate_num_feat_vecs(seconds):
         return int(seconds * 1000 / 20)
+
     print(" · Get num feature vectors...")
     df["num_feat_vectors"] = df.audio_len.parallel_apply(calculate_num_feat_vecs)
 
@@ -88,9 +120,10 @@ def get_audio_duration(df, AUDIO_TYPE):
     # get number of seconds of audio
     def _read_duration(audio):
         read_duration(AUDIO_TYPE, audio)
+
     print(" · Reading audio duration...")
     df["audio_len"] = df.abspath.parallel_apply(lambda x: read_duration(AUDIO_TYPE, x))
-    #df["audio_len"] = df.abspath.parallel_apply(_read_duration)
+    # df["audio_len"] = df.abspath.parallel_apply(_read_duration)
 
 
 def get_transcript_length(df):
@@ -113,14 +146,14 @@ def remove_offending_input_output_ratio(df, csv_file):
                 offending_samples_df.shape[0]
             )
         )
-        total_hours = ( offending_samples_df["audio_len"].sum() / 3600 )
+        total_hours = (offending_samples_df["audio_len"].sum() / 3600)
         print(
             "   ├ Removing a total of {:0.2f} hours of data from BEST dataset".format(
                 total_hours
             )
         )
         csv_name = (
-            str(Path(csv_file).resolve().absolute().with_suffix("")) + ".OFFENDING_DATA"
+                str(Path(csv_file).resolve().absolute().with_suffix("")) + ".OFFENDING_DATA"
         )
         offending_samples_df.to_csv(csv_name, index=False)
         print("   └ Wrote offending data to {}".format(csv_name))
@@ -128,6 +161,52 @@ def remove_offending_input_output_ratio(df, csv_file):
         return df
     else:
         print("😊 Found no offending <transcript,clip> pairs")
+        return df
+
+
+def remove_text_outliers(df, csv_file, num_std_devs, stt_model_path, stt_scorer_path):
+    print(" . Running stt model...")
+    stt_model = SttTranscriber(stt_model_path, stt_scorer_path)
+    stt_texts = []
+    for i in tqdm(range(len(df))):
+        # print(df.iloc[i]['abspath'])
+        stt_texts.append(stt_model.transcribe(df.iloc[i]['abspath']))
+
+    df['stt_transcript'] = stt_texts
+    #  df['stt_transcript'] = df.abspath.parallel_apply(lambda x: stt_model.transcribe(x), axis=1)
+    df['stt_len'] = df.parallel_apply(lambda x: len(x.stt_transcript), axis=1)
+    df["text_ratio"] = df.parallel_apply(
+        lambda x: float(x.transcript_len) / float(x.stt_len), axis=1
+    )
+    mean = df["text_ratio"].mean()
+    std = df["text_ratio"].std()
+
+    df["text_ratio_deviation"] = df.parallel_apply(
+        lambda x: abs(x.text_ratio - mean) - (num_std_devs * std), axis=1
+    )
+    offending_samples_df = df[df["text_ratio_deviation"] > 0]
+    if offending_samples_df.shape[0]:
+        print(
+            "👀 ┬ Found {} <transcript,stt_text> pairs more than {} standard deviations from the mean".format(
+                offending_samples_df.shape[0],
+                num_std_devs
+            )
+        )
+        total_hours = (offending_samples_df["audio_len"].sum() / 3600)
+        print(
+            "   ├ Removing a total of {:0.2f} hours of data from BEST dataset".format(
+                total_hours
+            )
+        )
+        csv_name = (
+                str(Path(csv_file).resolve().absolute().with_suffix("")) + ".NON_NORMAL"
+        )
+        offending_samples_df.to_csv(csv_name, index=False)
+        print("   └ Wrote offending data to {}".format(csv_name))
+        df = df[df["text_ratio_deviation"] <= 0]
+        return df
+    else:
+        print("😊 Found no <transcript,stt_transcript> pairs more than {} standard deviations from the mean".format(num_std_devs))
         return df
 
 
@@ -152,14 +231,14 @@ def remove_outliers(df, csv_file, num_std_devs):
                 num_std_devs
             )
         )
-        total_hours = ( offending_samples_df["audio_len"].sum() / 3600 )
+        total_hours = (offending_samples_df["audio_len"].sum() / 3600)
         print(
             "   ├ Removing a total of {:0.2f} hours of data from BEST dataset".format(
                 total_hours
             )
         )
         csv_name = (
-            str(Path(csv_file).resolve().absolute().with_suffix("")) + ".NON_NORMAL"
+                str(Path(csv_file).resolve().absolute().with_suffix("")) + ".NON_NORMAL"
         )
         offending_samples_df.to_csv(csv_name, index=False)
         print("   └ Wrote offending data to {}".format(csv_name))
@@ -179,14 +258,14 @@ def cut_off_audio_len(df, csv_file, max_len):
                 offending_samples_df.shape[0], max_len
             )
         )
-        total_hours = ( offending_samples_df["audio_len"].sum() / 3600 )
+        total_hours = (offending_samples_df["audio_len"].sum() / 3600)
         print(
             "   ├ Removing a total of {:0.2f} hours of data from BEST dataset".format(
                 total_hours
             )
         )
         csv_name = (
-            str(Path(csv_file).resolve().absolute().with_suffix("")) + ".TOO_LONG"
+                str(Path(csv_file).resolve().absolute().with_suffix("")) + ".TOO_LONG"
         )
         offending_samples_df.to_csv(csv_name, index=False)
         print("   └ Wrote too long data to {}".format(csv_name))
@@ -206,14 +285,14 @@ def cut_off_transcript_len(df, csv_file, min_len):
                 offending_samples_df.shape[0], min_len
             )
         )
-        total_hours = ( offending_samples_df["audio_len"].sum() / 3600 )
+        total_hours = (offending_samples_df["audio_len"].sum() / 3600)
         print(
             "   ├ Removing a total of {:0.2f} hours of data from BEST dataset".format(
                 total_hours
             )
         )
         csv_name = (
-            str(Path(csv_file).resolve().absolute().with_suffix("")) + ".TOO_SHORT_TRANS"
+                str(Path(csv_file).resolve().absolute().with_suffix("")) + ".TOO_SHORT_TRANS"
         )
         offending_samples_df.to_csv(csv_name, index=False)
         print("   └ Wrote too short transcript data to {}".format(csv_name))
@@ -231,6 +310,8 @@ if __name__ == "__main__":
 
     csv_file = sys.argv[1]
     num_std_devs = float(sys.argv[2])
+    stt_model_path = sys.argv[3]
+    stt_scorer_path = sys.argv[4]
 
     # can't use progress_bar=True https://github.com/nalepae/pandarallel/issues/131
     # in Docker, big CSVs run out of space in /dev/shm https://github.com/nalepae/pandarallel/issues/127
@@ -238,20 +319,20 @@ if __name__ == "__main__":
 
     ### Must-run ###
     df = pd.read_csv(csv_file)
-    if ( "transcript" not in df.columns ) or ( "wav_filename" not in df.columns ):
+    if ("transcript" not in df.columns) or ("wav_filename" not in df.columns):
         print("🚨 ERROR: missing headers 'transcript' and 'wav_filename'")
         exit(1)
     df = get_abspath(df, csv_file)
     org_total_samples = df.shape[0]
     print("👀 ─ Found {} <transcript,clip> pairs in {}".format(
-        org_total_samples,csv_file
+        org_total_samples, csv_file
     ))
     AUDIO_TYPE = get_audio_type(df)
     df = is_audio_readable(df, csv_file, AUDIO_TYPE)
 
     ### Following checks are as you wish ###
     get_audio_duration(df, AUDIO_TYPE)
-    org_total_hours = ( df["audio_len"].sum() / 3600 )
+    org_total_hours = (df["audio_len"].sum() / 3600)
     print(
         "👀 ─ Found a total of {:0.2f} hours of readable data".format(
             org_total_hours
@@ -265,17 +346,18 @@ if __name__ == "__main__":
     df = cut_off_transcript_len(df, csv_file, 10)
     df = remove_offending_input_output_ratio(df, csv_file)
     df = remove_outliers(df, csv_file, num_std_devs=num_std_devs)
+    df = remove_text_outliers(df, None, num_std_devs=num_std_devs, stt_model_path=stt_model_path, stt_scorer_path=stt_scorer_path)
 
     csv_name = (
-        str(Path(csv_file).resolve().absolute().with_suffix("")) + ".BEST"
+            str(Path(csv_file).resolve().absolute().with_suffix("")) + ".BEST"
     )
     df.to_csv(csv_name, index=False)
-    new_total_hours = ( df["audio_len"].sum() / 3600 )
+    new_total_hours = (df["audio_len"].sum() / 3600)
     total_hours_removed = org_total_hours - new_total_hours
-    percent_hours_removed = (total_hours_removed / org_total_hours)*100
+    percent_hours_removed = (total_hours_removed / org_total_hours) * 100
     new_total_samples = df.shape[0]
     total_samples_removed = org_total_samples - new_total_samples
-    percent_samples_removed = (total_samples_removed / org_total_samples)*100
+    percent_samples_removed = (total_samples_removed / org_total_samples) * 100
     print(
         "🎉 ┬ Saved a total of {:0.2f} hours of data to BEST dataset".format(
             new_total_hours
