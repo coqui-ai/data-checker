@@ -308,8 +308,6 @@ if __name__ == "__main__":
 
     csv_file = sys.argv[1]
     num_std_devs = float(sys.argv[2])
-    stt_model_path = sys.argv[3]
-    stt_scorer_path = sys.argv[4]
 
     # can't use progress_bar=True https://github.com/nalepae/pandarallel/issues/131
     # in Docker, big CSVs run out of space in /dev/shm https://github.com/nalepae/pandarallel/issues/127
@@ -344,7 +342,10 @@ if __name__ == "__main__":
     df = cut_off_transcript_len(df, csv_file, 10)
     df = remove_offending_input_output_ratio(df, csv_file)
     df = remove_outliers(df, csv_file, num_std_devs=num_std_devs)
-    df = remove_text_outliers(df, None, num_std_devs=num_std_devs, stt_model_path=stt_model_path, stt_scorer_path=stt_scorer_path)
+    if len(sys.argv) > 3:
+        stt_model_path = sys.argv[3]
+        stt_scorer_path = sys.argv[4]
+        df = remove_text_outliers(df, csv_file, num_std_devs=num_std_devs, stt_model_path=stt_model_path, stt_scorer_path=stt_scorer_path)
 
     csv_name = (
             str(Path(csv_file).resolve().absolute().with_suffix("")) + ".BEST"
